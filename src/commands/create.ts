@@ -3,6 +3,7 @@ import chalk from "chalk";
 import ora from "ora";
 import fs from "fs-extra";
 import path from "path";
+import { runCommand } from "../utils/runCommand";
 import TemplatesConfig from "../templatesConfig";
 
 export async function createCommand(projectName: string) {
@@ -18,18 +19,19 @@ export async function createCommand(projectName: string) {
     ? path.basename(process.cwd())
     : projectName;
 
+  // ❌ DO NOT use process.exit
   if (!isCurrentDir && fs.existsSync(targetPath)) {
-    console.log(
+    console.error(
       chalk.red(`\nError: directory "${projectName}" already exists.`),
     );
-    process.exit(1);
+    return;
   }
 
   if (isCurrentDir) {
     const files = await fs.readdir(targetPath);
     if (files.length > 0) {
-      console.log(chalk.red("\nError: current directory is not empty."));
-      process.exit(1);
+      console.error(chalk.red("\nError: current directory is not empty."));
+      return;
     }
   }
 
@@ -45,28 +47,50 @@ export async function createCommand(projectName: string) {
     },
   ]);
 
-  const spinner = ora("Creating project...").start();
+  const createSpinner = ora("Creating project...").start();
 
-  if (!isCurrentDir) {
-    await fs.mkdir(targetPath);
+  try {
+    if (!isCurrentDir) {
+      await fs.mkdir(targetPath);
+    }
+
+    const template = TemplatesConfig[projectType];
+    if (!template) {
+      throw new Error("Invalid project type selected");
+    }
+
+    await template.generator(targetPath, resolvedProjectName);
+
+    createSpinner.succeed("Project created successfully");
+  } catch (error) {
+    createSpinner.fail("Project creation failed");
+    console.error(chalk.red((error as Error).message));
+    return;
   }
 
-  const template = TemplatesConfig[projectType];
-  if (!template) {
-    spinner.fail("Invalid project type selected");
-    process.exit(1);
+  // ---- INSTALL PHASE (separate spinner) ----
+
+  console.log(chalk.yellow("\nInstalling dependencies (npm install)..."));
+  console.log(chalk.gray("This may take a few minutes.\n"));
+
+  try {
+    await runCommand("npm", ["install"], targetPath);
+    console.log(chalk.green("\nDependencies installed successfully"));
+  } catch (error) {
+    console.error(chalk.red("\nDependency installation failed"));
+    console.error(chalk.red((error as Error).message));
+    return;
   }
 
-  await template.generator(targetPath, resolvedProjectName);
-  spinner.succeed("\nProject created successfully");
+  console.log(chalk.green("\nNext steps:"));
 
-  console.log(chalk.green("Next steps:"));
   if (!isCurrentDir) {
     console.log(chalk.gray(`  cd ${resolvedProjectName}`));
   }
 
-  const nextSteps = template.nextSteps;
-  nextSteps.forEach((step) => {
+  TemplatesConfig[projectType].nextSteps.forEach((step) => {
     console.log(chalk.gray(`  ${step.command}`));
   });
+
+  console.log(chalk.blue.bold("\nHappy Coding!\n"));
 }

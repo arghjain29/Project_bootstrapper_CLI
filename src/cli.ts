@@ -18,3 +18,8 @@ program
   });
 
 program.parse(process.argv);
+
+process.on("SIGINT", () => {
+  console.log("\nAborted by user.");
+  process.exit(0);
+});
