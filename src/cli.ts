@@ -13,8 +13,11 @@ program
 program
   .command("create <project-name>")
   .description("Create a new project")
-  .action((projectName: string) => {
-    createCommand(projectName);
+  .option("--no-install", "Skip dependency installation")
+  .option("--no-git", "Skip git initialization")
+  .option("--force", "Overwrite existing directory")
+  .action((projectName: string, options: { install: boolean; git: boolean; force: boolean }) => {
+    createCommand(projectName, options);
   });
 
 program.parse(process.argv);

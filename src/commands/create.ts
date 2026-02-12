@@ -4,9 +4,13 @@ import ora from "ora";
 import fs from "fs-extra";
 import path from "path";
 import { runCommand } from "../utils/runCommand";
+import { createGitIgnore } from "../utils/gitIgnore";
 import TemplatesConfig from "../templatesConfig";
 
-export async function createCommand(projectName: string) {
+export async function createCommand(
+  projectName: string,
+  options: { install: boolean; git: boolean; force: boolean },
+) {
   console.log(chalk.blue.bold("\nProject Bootstrapper\n"));
 
   const isCurrentDir = projectName === ".";
@@ -19,19 +23,47 @@ export async function createCommand(projectName: string) {
     ? path.basename(process.cwd())
     : projectName;
 
-  // ❌ DO NOT use process.exit
-  if (!isCurrentDir && fs.existsSync(targetPath)) {
-    console.error(
-      chalk.red(`\nError: directory "${projectName}" already exists.`),
-    );
-    return;
-  }
+  // Force logic
+  if (!isCurrentDir) {
+    if (fs.existsSync(targetPath)) {
+      if (!options.force) {
+        console.error(
+          chalk.red(
+            `\nError: directory "${projectName}" already exists. Use --force to overwrite.`,
+          ),
+        );
+        return;
+      }
 
-  if (isCurrentDir) {
+      console.log(
+        chalk.yellow(
+          `\nOverwriting existing directory "${projectName}" (--force)`,
+        ),
+      );
+
+      await fs.remove(targetPath);
+    }
+  } else {
     const files = await fs.readdir(targetPath);
+
     if (files.length > 0) {
-      console.error(chalk.red("\nError: current directory is not empty."));
-      return;
+      if (!options.force) {
+        console.error(
+          chalk.red(
+            "\nError: current directory is not empty. Use --force to overwrite.",
+          ),
+        );
+        return;
+      }
+
+      console.log(
+        chalk.yellow("\nOverwriting current directory contents (--force)"),
+      );
+
+      // remove all contents but keep directory
+      for (const file of files) {
+        await fs.remove(path.join(targetPath, file));
+      }
     }
   }
 
@@ -68,29 +100,63 @@ export async function createCommand(projectName: string) {
     return;
   }
 
-  // ---- INSTALL PHASE (separate spinner) ----
+  // ---------------- INSTALL PHASE ----------------
 
-  console.log(chalk.yellow("\nInstalling dependencies (npm install)..."));
-  console.log(chalk.gray("This may take a few minutes.\n"));
+  if (options.install) {
+    console.log(chalk.yellow("\nInstalling dependencies (npm install)..."));
+    console.log(chalk.gray("This may take a few minutes.\n"));
 
-  try {
-    await runCommand("npm", ["install"], targetPath);
-    console.log(chalk.green("\nDependencies installed successfully"));
-  } catch (error) {
-    console.error(chalk.red("\nDependency installation failed"));
-    console.error(chalk.red((error as Error).message));
-    return;
+    try {
+      await runCommand("npm", ["install"], targetPath);
+      console.log(chalk.green("\n✅ Dependencies installed successfully"));
+    } catch (error) {
+      console.error(chalk.red("\nDependency installation failed"));
+      console.error(chalk.red((error as Error).message));
+      return;
+    }
+  } else {
+    console.log(
+      chalk.yellow("\nSkipping dependency installation (--no-install)"),
+    );
   }
+
+  // ---------------- GIT PHASE (AFTER INSTALL) ----------------
+
+  if (options.git) {
+    console.log(chalk.yellow("\nInitializing Git repository...\n"));
+
+    try {
+      // Always create gitignore before init
+      await createGitIgnore(targetPath);
+
+      await runCommand("git", ["init"], targetPath);
+      await runCommand("git", ["add", "."], targetPath);
+      await runCommand("git", 'git commit -m "Initial commit"', targetPath);
+
+      console.log(chalk.green("✅ Git repository initialized"));
+    } catch (error) {
+      console.log(
+        chalk.gray(
+          "Git initialization skipped (git not installed or commit failed)",
+        ),
+      );
+    }
+  } else {
+    console.log(chalk.yellow("\nSkipping Git initialization (--no-git)"));
+  }
+
+  // ---------------- NEXT STEPS ----------------
 
   console.log(chalk.green("\nNext steps:"));
 
   if (!isCurrentDir) {
-    console.log(chalk.gray(`  cd ${resolvedProjectName}`));
+    console.log(chalk.gray(`  cd ./${resolvedProjectName}`));
   }
 
   TemplatesConfig[projectType].nextSteps.forEach((step) => {
+    if (step.command === "npm install" && options.install) return;
     console.log(chalk.gray(`  ${step.command}`));
   });
 
-  console.log(chalk.blue.bold("\nHappy Coding!\n"));
+  console.log(chalk.blue.bold("\n🎉 Happy Coding!\n"));
 }
